@@ -121,6 +121,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout kteam-tools
+        run: |
+          echo "::group::git clone kteam-tools"
+          git clone --depth 1 \
+              https://kernel.ubuntu.com/gitea/kernel/kteam-tools.git
+          echo "::endgroup::"
+
       - name: Check QEMU necessity
         id: transform
         shell: bash
@@ -164,6 +171,7 @@ jobs:
         with:
           labels: |
             org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.version=20240311-git28d47a30
           images: ghcr.io/${{ github.repository }}
           flavor: |
             latest=false
@@ -172,12 +180,13 @@ jobs:
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
 
-      - name: Build
+      - name: Build docker images
         uses: docker/build-push-action@v5
         with:
           annotations: ${{ contains(steps.transform.outputs.platforms, ',') && steps.meta.outputs.annotations || '' }}
           build-args: |
               SERIES=${{ matrix.series }}
+          context: '.'
           labels: ${{ steps.meta.outputs.labels }}
           load: true
           no-cache: true
