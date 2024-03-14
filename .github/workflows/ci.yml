@@ -189,6 +189,7 @@ jobs:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
 
       - name: Build docker images
+        id: build
         uses: docker/build-push-action@v5
         with:
           annotations: ${{ contains(steps.transform.outputs.platforms, ',') && steps.meta.outputs.annotations || '' }}
@@ -201,3 +202,46 @@ jobs:
           platforms: ${{ matrix.platforms }}
           provenance: false
           tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Checkout kernel tree
+        run: |
+          echo "::group::git clone kernel"
+          sudo git clone --depth 1 \
+              https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/${{ matrix.series }} \
+              linux
+          echo "::endgroup::"
+
+      - name: Test built docker images
+        env:
+          IMAGE_NAME: ${{ fromJSON(steps.build.outputs.metadata)['image.name'] }}
+        run: |
+          arches=(${{ matrix.arches }})
+          for arch in "${arches[@]}"; do
+            echo "::group::Testing ${{ matrix.series }}:${arch}"
+
+            platform=
+            case "${arch}" in
+              amd64) platform=linux/amd64;;
+              i386) platform=linux/386;;
+              arm64) platform=linux/arm64/v8;;
+              armhf) platform=linux/arm/v7;;
+              armel) platform=linux/arm/v5;;
+              mips64el) platform=linux/mips64le;;
+              riscv64) platform=linux/riscv64;;
+              ppc64el) platform=linux/ppc64le;;
+              s390x) platform=linux/s390x;;
+            esac
+
+            container_id=$(docker run --platform "${platform}" --rm --detach \
+                --volume ./linux:/build --workdir /build \
+                "${IMAGE_NAME}" tail -f /dev/null)
+
+            EXECCMD="docker exec ${container_id}"
+            ${EXECCMD} fakeroot debian/rules clean
+            ${EXECCMD} git clean -d -f -x
+            ${EXECCMD} git status
+
+            docker stop "${container_id}"
+
+            echo "::endgroup::"
+          done
