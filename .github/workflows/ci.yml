@@ -16,7 +16,64 @@ on:
       - 'README.*'
 
 jobs:
-  dummy:
+  generate-matrix:
     runs-on: ubuntu-latest
     steps:
-      - run: echo true
+      -
+        # Add support for more platforms with QEMU (optional)
+        # https://github.com/docker/setup-qemu-action
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: v0.12.0
+
+      - name: Checkout kteam-tools
+        run: |
+          echo "::group::git clone kteam-tools"
+          git clone --depth 1 \
+              https://kernel.ubuntu.com/gitea/kernel/kteam-tools.git
+          echo "::endgroup::"
+
+      - name: Build Ubuntu series info
+        run: |
+          export CDIR="$(realpath kteam-tools/chroot-setup)"
+          ktl_series="$(${CDIR}/scripts/chroot-config release | tr -d ';')"
+          json="[]"
+          while read discard series status; do \
+            expired="false"
+            old="false"
+            [ "${status}" != "expired" ] || expired="true"
+            [ "${status}" != "old" ] || old="true"
+            series_json="{\"series\": \"${series}\", \"arches\": [], \"expired\": ${expired}, \"old\": ${old}}"
+
+            platforms=( $(docker buildx imagetools inspect "ubuntu:${series}" | \
+                awk '/Platform:/ {print $2}') ); \
+            for platform in "${platforms[@]}"; do \
+              arch=; \
+              case "${platform}" in \
+                linux/amd64)    arch="amd64" ;; \
+                linux/arm/v5)   arch="armel" ;; \
+                linux/arm/v7)   arch="armhf" ;; \
+                linux/arm64/v8) arch="arm64" ;; \
+                linux/i386)     arch="i386" ;; \
+                linux/mips64le) arch="mips64el" ;; \
+                linux/ppc64le)  arch="ppc64el" ;; \
+                linux/riscv64)  arch="riscv64" ;; \
+                linux/s390x)    arch="s390x" ;; \
+                *) ;; \
+              esac; \
+              if [ -n "${arch}" ]; then \
+                series_json="$(echo "${series_json}" | \
+                    jq -c -M ".arches += [{\"platform\": \"${platform}\", \"arch\": \"${arch}\"}]")"; \
+              fi; \
+            done; \
+            if [ "$(echo "${series_json}" | jq -c -M ".arches | length")" != "0" ]; then \
+              json="$(echo "${json}" | jq -c -M ". + [${series_json}]")"; \
+            fi; \
+          done <<<"${ktl_series}"
+
+          echo "::group::Outputs"
+          echo "json=${json}" | tee -a "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
