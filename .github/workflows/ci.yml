@@ -1,0 +1,22 @@
+---
+name: 'CI'
+on:
+  push:
+    branches:
+      - main
+      - 'releases/v*'
+    tags:
+      - 'v*'
+    paths-ignore:
+      - LICENSE
+      - 'README.*'
+  pull_request:
+    paths-ignore:
+      - LICENSE
+      - 'README.*'
+
+jobs:
+  dummy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo true
