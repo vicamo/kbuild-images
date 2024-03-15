@@ -151,7 +151,11 @@ esac
 
 # Always needed for selftests, available in all suites, not declared
 # as a default build-dep
-ADDPKG="${ADDPKG} clang libelf-dev llvm lld libfuse-dev"
+ADDPKG="${ADDPKG} clang libelf-dev llvm libfuse-dev"
+case "$SERIES-${ARCH}" in
+  trusty-*|xenial-*|bionic-arm64|bionic-ppc64el|bionic-s390x|focal-s390x|jammy-s390x) ;;
+  *) ADDPKG="${ADDPKG} lld" ;;
+esac
 
 dpkg --configure -a
 apt-get -y --force-yes update
