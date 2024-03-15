@@ -1,0 +1,29 @@
+From 68e8e5caa8473ddc03b8f064571e477cfe0fc8c5 Mon Sep 17 00:00:00 2001
+From: You-Sheng Yang <vicamo@gmail.com>
+Date: Fri, 15 Mar 2024 14:29:46 +0800
+Subject: [PATCH] chroot-setup: trusty,xenial: disable i386 build arch due to
+ missing packages
+
+Signed-off-by: You-Sheng Yang <vicamo@gmail.com>
+---
+ chroot-setup/scripts/chroot-defs.conf | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/chroot-setup/scripts/chroot-defs.conf b/chroot-setup/scripts/chroot-defs.conf
+index 7439873b..924a3c88 100755
+--- a/chroot-setup/scripts/chroot-defs.conf
++++ b/chroot-setup/scripts/chroot-defs.conf
+@@ -414,8 +414,8 @@ eval $($CONFIG_DIR/chroot-config release)
+ # BUILD ARCHES: defines the architectures we can build for
+ release_build_arches dapper "amd64 i386"
+ release_build_arches precise "amd64 armel armhf i386 powerpc" 
+-release_build_arches trusty "amd64 arm64 armhf i386 powerpc ppc64el"
+-release_build_arches xenial "amd64 arm64 armhf i386 powerpc ppc64el s390x"
++release_build_arches trusty "amd64 arm64 armhf powerpc ppc64el"
++release_build_arches xenial "amd64 arm64 armhf powerpc ppc64el s390x"
+ release_build_arches zesty "amd64 arm64 armhf i386 ppc64el s390x"
+ release_build_arches focal "amd64 arm64 armhf i386 ppc64el riscv64 s390x"
+ release_build_arches_sparse
+-- 
+2.43.0
+
