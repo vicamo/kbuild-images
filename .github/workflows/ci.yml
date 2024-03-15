@@ -126,6 +126,14 @@ jobs:
           echo "::group::git clone kteam-tools"
           git clone --depth 1 \
               https://kernel.ubuntu.com/gitea/kernel/kteam-tools.git
+
+          cd kteam-tools
+          git config --global user.name github-ci
+          git config --global user.email github-ci@github-ci
+          for patch in ${GITHUB_WORKSPACE}/patches/*.patch; do
+            git am -s ${patch}
+          done
+
           echo "::endgroup::"
 
       - name: Check QEMU necessity
