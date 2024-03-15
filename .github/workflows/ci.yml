@@ -215,9 +215,18 @@ jobs:
         env:
           IMAGE_NAME: ${{ fromJSON(steps.build.outputs.metadata)['image.name'] }}
         run: |
+          header="| Packages |"
+          neck="| :-- |"
+
           arches=(${{ matrix.arches }})
           for arch in "${arches[@]}"; do
             echo "::group::Testing ${{ matrix.series }}:${arch}"
+
+            header="${header} ${arch} |"
+            neck="${neck} :-- |"
+
+            eval "declare -A pkginfo_${arch}"
+            eval "declare -n pkginfo=pkginfo_${arch}"
 
             platform=
             case "${arch}" in
@@ -241,7 +250,41 @@ jobs:
             ${EXECCMD} git clean -d -f -x
             ${EXECCMD} git status
 
+            # Generate image report
+            result=$(${EXECCMD} dpkg-query -l | \
+                tail -n +6 | awk '{print $1 " " $2 " " $3}')
+            while read status name version; do \
+              [ "${status}" = "ii" ] || exit 1; \
+              pkginfo["${name}"]="${version}"; \
+            done <<<"$result"
+
             docker stop "${container_id}"
+
+            unset -n pkginfo
 
             echo "::endgroup::"
           done
+
+          all_packages=($( \
+              for arch in "${arches[@]}"; do \
+                eval "declare -n pkginfo=pkginfo_${arch}"; \
+                echo ${!pkginfo[@]}; \
+                unset -n pkginfo; \
+              done | tr ' ' '\n' | sort -u | tr '\n' ' '))
+          body=
+          for pkg in "${all_packages[@]}"; do \
+            body="${body}|${pkg}|"; \
+            for arch in "${arches[@]}"; do \
+              eval "declare -n pkginfo=pkginfo_${arch}"; \
+              body="${body}${pkginfo[${pkg}]:- }|"; \
+              unset -n pkginfo; \
+            done; \
+            body="${body}"$'\n'; \
+          done
+
+          { \
+            echo "# ${{ matrix.series }}"; \
+            echo "${header}"; \
+            echo "${neck}"; \
+            echo "${body}"; \
+          } >> "${GITHUB_STEP_SUMMARY}"
