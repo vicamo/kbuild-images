@@ -151,10 +151,12 @@ esac
 
 # Always needed for selftests, available in all suites, not declared
 # as a default build-dep
-ADDPKG="${ADDPKG} clang libelf-dev llvm libfuse-dev"
+ADDPKG="${ADDPKG} libelf-dev libfuse-dev"
 case "$SERIES-${ARCH}" in
-  trusty-*|xenial-*|bionic-arm64|bionic-ppc64el|bionic-s390x|focal-s390x|jammy-s390x) ;;
-  *) ADDPKG="${ADDPKG} lld" ;;
+  trusty-ppc64el) ADDPKG="${ADDPKG} clang-3.9 llvm-3.9-dev" ;;
+  trusty-*|xenial-*) ;;
+  bionic-arm64|bionic-ppc64el|bionic-s390x|focal-s390x|jammy-s390x) ADDPKG="${ADDPKG} clang llvm" ;;
+  *) ADDPKG="${ADDPKG} clang lld llvm" ;;
 esac
 
 dpkg --configure -a
