@@ -104,12 +104,11 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.generate-matrix.outputs.json) }}
     steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+
       - name: Enable Containerd Snapshotter
         run: |
-          echo "::group::docker image prune"
-          docker image prune --all --force
-          echo "::endgroup::"
-
           cat /etc/docker/daemon.json | \
               jq '. | .+{"features": {"containerd-snapshotter": true}}' | \
               sudo tee /etc/docker/daemon.json.new
