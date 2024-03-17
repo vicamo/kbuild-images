@@ -127,7 +127,12 @@ case "$SERIES" in
   xenial|bionic|cosmic|disco) ADDPKG="${ADDPKG} dkms wget curl" ;;
 esac
 case "$SERIES" in
-  xenial) ADDPKG="${ADDPKG} libnuma-dev python-sphinx" ;;
+  xenial)
+    case "${ARCH}" in
+      armhf) ;;
+      *) ADDPKG="${ADDPKG} libnuma-dev" ;;
+    esac
+    ADDPKG="${ADDPKG} python-sphinx" ;;
 esac
 case "$SERIES" in
   xenial|bionic|disco|eoan|focal|groovy|hirsute) ADDPKG="${ADDPKG} libcap-dev" ;;
