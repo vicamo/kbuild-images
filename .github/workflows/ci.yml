@@ -18,6 +18,8 @@ on:
 jobs:
   generate-matrix:
     runs-on: ubuntu-latest
+    outputs:
+      json: ${{ steps.matrix.outputs.json }}
     steps:
       -
         # Add support for more platforms with QEMU (optional)
@@ -37,6 +39,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Build Ubuntu series info
+        id: series
         run: |
           export CDIR="$(realpath kteam-tools/chroot-setup)"
           ktl_series="$(${CDIR}/scripts/chroot-config release | tr -d ';')"
@@ -73,6 +76,17 @@ jobs:
               json="$(echo "${json}" | jq -c -M ". + [${series_json}]")"; \
             fi; \
           done <<<"${ktl_series}"
+
+          echo "::group::Outputs"
+          echo "json=${json}" | tee -a "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
+
+      - name: Transform build matrix
+        id: matrix
+        run: |
+          json='${{ steps.series.outputs.json }}'
+          json="$(echo "$json" | \
+              jq -c -M "[.[] | select(.expired|not) | {\"series\": .series, \"arches\": ([ .arches[] | .arch ] | join(\" \")), \"platforms\": ([ .arches[] | .platform ] | join(\",\"))}]")"
 
           echo "::group::Outputs"
           echo "json=${json}" | tee -a "${GITHUB_OUTPUT}"
