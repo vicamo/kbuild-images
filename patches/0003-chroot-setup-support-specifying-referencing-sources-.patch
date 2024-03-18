@@ -1,0 +1,83 @@
+From 0e645866a2e8f08005b03277422e04772efc892d Mon Sep 17 00:00:00 2001
+From: You-Sheng Yang <vicamo@gmail.com>
+Date: Mon, 18 Mar 2024 12:59:25 +0800
+Subject: [PATCH] chroot-setup: support specifying referencing sources list
+
+Signed-off-by: You-Sheng Yang <vicamo@gmail.com>
+---
+ chroot-setup/scripts/chroot-defs.conf | 45 +++++++++++++++++++++++++--
+ 1 file changed, 42 insertions(+), 3 deletions(-)
+
+diff --git a/chroot-setup/scripts/chroot-defs.conf b/chroot-setup/scripts/chroot-defs.conf
+index 924a3c88..4aa9eb8d 100755
+--- a/chroot-setup/scripts/chroot-defs.conf
++++ b/chroot-setup/scripts/chroot-defs.conf
+@@ -242,13 +242,33 @@ function ports_arch ()
+ #
+ function write_mirror ()
+ {
++local SL=/etc/apt/sources.list
++while [ $# -gt 0 ]
++do
++	case "$1" in
++	--source|--source=*)
++		if [ "$1" = "--source" ]; then
++			shift
++			if [ $# -eq 0 ]; then
++				echo "Missing operant."
++				exit 1
++			fi
++			SL="$1"
++		else
++			SL="${1#--source=}"
++		fi
++		shift ;;
++	*)
++		break ;;
++	esac
++done
++
+ local SUITE=$1
+ local ARCH=$2
+ local TARG=$3
+ 
+ ARCHIVES="main universe"
+ SOURCE_URL=http://archive.ubuntu.com/ubuntu
+-SL=/etc/apt/sources.list
+ 
+ if ! get_pockets ${SUITE} ; then
+ 	echo write_mirror: Bogus release ${SUITE}
+@@ -361,9 +381,28 @@ fi
+ #
+ function get_suite_mirror ()
+ {
+-local SUITE=$1
++local SL=/etc/apt/sources.list
++while [ $# -gt 0 ]
++do
++	case "$1" in
++	--source|--source=*)
++		if [ "$1" = "--source" ]; then
++			shift
++			if [ $# -eq 0 ]; then
++				echo "Missing operant."
++				exit 1
++			fi
++			SL="$1"
++		else
++			SL="${1#--source=}"
++		fi
++		shift ;;
++	*)
++		break ;;
++	esac
++done
+ 
+-SL=/etc/apt/sources.list
++local SUITE=$1
+ 
+ if ! get_pockets ${SUITE} ; then
+ 	echo get_suite_mirror: Bogus release ${SUITE}
+-- 
+2.43.0
+

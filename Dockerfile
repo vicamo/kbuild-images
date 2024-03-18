@@ -27,8 +27,13 @@ get_apt_trusted "$SERIES"
 [ -z "${APT_TRUSTED}" ] || \
     cp "${CDIR}/scripts/${APT_TRUSTED}" /etc/apt/trusted.gpg.d
 
-write_mirror $SERIES ${ARCH} /etc/apt/sources.list.new
-mv /etc/apt/sources.list.new /etc/apt/sources.list
+if [ $(release_idx $SERIES) -lt $(release_idx noble) ]; then
+  write_mirror $SERIES ${ARCH} /etc/apt/sources.list.new
+  mv /etc/apt/sources.list.new /etc/apt/sources.list
+else
+  write_mirror --source=/etc/apt/sources.list.d/ubuntu.sources $SERIES ${ARCH} /etc/apt/sources.list
+  rm /etc/apt/sources.list.d/ubuntu.sources
+fi
 
 echo "deb http://ppa.launchpad.net/canonical-kernel-team/builder-extra/ubuntu $SERIES main" \
     | tee /etc/apt/sources.list.d/canonical-kernel-team-ubuntu-builder-extra-$SERIES.list
