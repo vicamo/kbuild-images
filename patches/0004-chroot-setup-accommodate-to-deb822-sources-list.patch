@@ -1,0 +1,50 @@
+From 97829415639df4df1f282e8e0ac3ec7d9648d987 Mon Sep 17 00:00:00 2001
+From: You-Sheng Yang <vicamo@gmail.com>
+Date: Mon, 18 Mar 2024 14:29:59 +0800
+Subject: [PATCH] chroot-setup: accommodate to deb822 sources list
+
+Signed-off-by: You-Sheng Yang <vicamo@gmail.com>
+---
+ chroot-setup/scripts/chroot-defs.conf | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/chroot-setup/scripts/chroot-defs.conf b/chroot-setup/scripts/chroot-defs.conf
+index 4aa9eb8d..d5ab431b 100755
+--- a/chroot-setup/scripts/chroot-defs.conf
++++ b/chroot-setup/scripts/chroot-defs.conf
+@@ -278,7 +278,7 @@ fi
+ local index=0
+ for i in "${mirror_sites[@]}"
+ do
+-	if egrep "$i" ${SL} > /dev/null
++	if egrep "^((deb)|(URIs:)) $i" ${SL} > /dev/null
+ 	then
+ 		echo > ${TARG}
+ 
+@@ -411,7 +411,7 @@ fi
+ local index=0
+ for i in "${mirror_sites[@]}"
+ do
+-	if egrep "$i" ${SL} > /dev/null
++	if egrep "^((deb)|(URIs:)) $i" ${SL} > /dev/null
+ 	then
+ 		#
+ 		# Make sure the mirror pocket exists. Otherwise, fall back to the
+@@ -471,10 +471,10 @@ release_apt_trusted bionic "trusted.asc"
+ release_apt_trusted_sparse
+ 
+ # Use as an index into mirror[] and mirror_ports[]
+-mirror_sites[3]="^deb .*ports\.ubuntu\.com"
+-mirror_sites[2]="^deb .*archive\.redvoodoo\.org"
+-mirror_sites[1]="^deb .*mirror\.rtg\.local"
+-mirror_sites[0]="^deb .*archive\.ubuntu\.com"
++mirror_sites[3]=".*ports\.ubuntu\.com"
++mirror_sites[2]=".*archive\.redvoodoo\.org"
++mirror_sites[1]=".*mirror\.rtg\.local"
++mirror_sites[0]=".*archive\.ubuntu\.com"
+ 
+ # The release and security mirrors
+ mirror_release[2]="http://archive.redvoodoo.org/ubuntu"
+-- 
+2.43.0
+
