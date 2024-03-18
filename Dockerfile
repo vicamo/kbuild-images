@@ -1,0 +1,2 @@
+ARG SERIES=devel
+FROM ubuntu:$SERIES

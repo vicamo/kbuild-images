@@ -1,0 +1,186 @@
+---
+name: 'CI'
+on:
+  push:
+    branches:
+      - main
+      - 'releases/v*'
+    tags:
+      - 'v*'
+    paths-ignore:
+      - LICENSE
+      - 'README.*'
+  pull_request:
+    paths-ignore:
+      - LICENSE
+      - 'README.*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      json: ${{ steps.matrix.outputs.json }}
+    steps:
+      -
+        # Add support for more platforms with QEMU (optional)
+        # https://github.com/docker/setup-qemu-action
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: v0.12.0
+
+      - name: Checkout kteam-tools
+        run: |
+          echo "::group::git clone kteam-tools"
+          git clone --depth 1 \
+              https://kernel.ubuntu.com/gitea/kernel/kteam-tools.git
+          echo "::endgroup::"
+
+      - name: Build Ubuntu series info
+        id: series
+        run: |
+          export CDIR="$(realpath kteam-tools/chroot-setup)"
+          ktl_series="$(${CDIR}/scripts/chroot-config release | tr -d ';')"
+          json="[]"
+          while read discard series status; do \
+            expired="false"
+            old="false"
+            [ "${status}" != "expired" ] || expired="true"
+            [ "${status}" != "old" ] || old="true"
+            series_json="{\"series\": \"${series}\", \"arches\": [], \"expired\": ${expired}, \"old\": ${old}}"
+
+            platforms=( $(docker buildx imagetools inspect "ubuntu:${series}" | \
+                awk '/Platform:/ {print $2}') ); \
+            for platform in "${platforms[@]}"; do \
+              arch=; \
+              case "${platform}" in \
+                linux/amd64)    arch="amd64" ;; \
+                linux/arm/v5)   arch="armel" ;; \
+                linux/arm/v7)   arch="armhf" ;; \
+                linux/arm64/v8) arch="arm64" ;; \
+                linux/i386)     arch="i386" ;; \
+                linux/mips64le) arch="mips64el" ;; \
+                linux/ppc64le)  arch="ppc64el" ;; \
+                linux/riscv64)  arch="riscv64" ;; \
+                linux/s390x)    arch="s390x" ;; \
+                *) ;; \
+              esac; \
+              if [ -n "${arch}" ]; then \
+                series_json="$(echo "${series_json}" | \
+                    jq -c -M ".arches += [{\"platform\": \"${platform}\", \"arch\": \"${arch}\"}]")"; \
+              fi; \
+            done; \
+            if [ "$(echo "${series_json}" | jq -c -M ".arches | length")" != "0" ]; then \
+              json="$(echo "${json}" | jq -c -M ". + [${series_json}]")"; \
+            fi; \
+          done <<<"${ktl_series}"
+
+          echo "::group::Outputs"
+          echo "json=${json}" | tee -a "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
+
+      - name: Transform build matrix
+        id: matrix
+        run: |
+          json='${{ steps.series.outputs.json }}'
+          json="$(echo "$json" | \
+              jq -c -M "[.[] | select(.expired|not) | {\"series\": .series, \"arches\": ([ .arches[] | .arch ] | join(\" \")), \"platforms\": ([ .arches[] | .platform ] | join(\",\"))}]")"
+
+          echo "::group::Outputs"
+          echo "json=${json}" | tee -a "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
+
+  build:
+    runs-on: ubuntu-latest
+    needs:
+      - generate-matrix
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.generate-matrix.outputs.json) }}
+    steps:
+      - name: Enable Containerd Snapshotter
+        run: |
+          echo "::group::docker image prune"
+          docker image prune --all --force
+          echo "::endgroup::"
+
+          cat /etc/docker/daemon.json | \
+              jq '. | .+{"features": {"containerd-snapshotter": true}}' | \
+              sudo tee /etc/docker/daemon.json.new
+          sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+          sudo systemctl restart docker
+
+          docker info -f '{{ .DriverStatus }}'
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check QEMU necessity
+        id: transform
+        shell: bash
+        run: |
+          arches=(${{ matrix.arches }})
+          platforms="${{ matrix.platforms }}"
+
+          native=" $(dpkg --print-architecture) $(dpkg --print-foreign-architectures) "
+          qemu="false"
+          for arch in "${arches[@]}"; do
+            case "${native}" in
+              *" ${arch} "*) ;;
+              *) qemu="true" ;;
+            esac
+          done
+
+          echo "::group::Outputs"
+          echo "qemu=${qemu}" | tee -a "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
+
+      -
+        # Add support for more platforms with QEMU (optional)
+        # https://github.com/docker/setup-qemu-action
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        if: steps.transform.outputs.qemu == 'true'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: v0.12.0
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          labels: |
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+          images: ghcr.io/${{ github.repository }}
+          flavor: |
+            latest=false
+          tags: |
+            ${{ matrix.series }}
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+
+      - name: Build
+        uses: docker/build-push-action@v5
+        with:
+          annotations: ${{ contains(steps.transform.outputs.platforms, ',') && steps.meta.outputs.annotations || '' }}
+          build-args: |
+              SERIES=${{ matrix.series }}
+          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+          no-cache: true
+          platforms: ${{ matrix.platforms }}
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
