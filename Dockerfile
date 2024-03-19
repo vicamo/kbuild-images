@@ -164,20 +164,20 @@ case "$SERIES-${ARCH}" in
   *) ADDPKG="${ADDPKG} clang lld llvm" ;;
 esac
 
-dpkg --configure -a
-apt-get -y --force-yes update
-apt-get -u -y --force-yes dist-upgrade
-apt-get -u -y --force-yes autoremove
-apt-get clean
+time dpkg --configure -a
+time apt-get -y --force-yes update
+time apt-get -u -y --force-yes dist-upgrade
+time apt-get -u -y --force-yes autoremove
+time apt-get clean
 
-apt-get -y --force-yes --no-install-recommends install build-essential
-apt-get -y --force-yes build-dep --only-source ${BUILD_DEP}
-apt-get -y --force-yes --no-install-recommends install ${ADDPKG}
+time apt-get -y --force-yes --no-install-recommends install build-essential
+time apt-get -y --force-yes build-dep --only-source ${BUILD_DEP}
+time apt-get -y --force-yes --no-install-recommends install ${ADDPKG}
 for pkg in ${ADDPKG}; do
   installed=$(dpkg-query --show --showformat='${Status}' ${pkg} || true)
   if [ "${installed}" != "install ok installed" ]; then
     echo Installing ${pkg}
-    apt-get -y --force-yes --no-install-recommends install ${pkg}
+    time apt-get -y --force-yes --no-install-recommends install ${pkg}
   fi
 done
 
@@ -187,7 +187,7 @@ for pkg in ${RMPKG}; do
   installed=$(dpkg-query --show --showformat='${Status}' ${pkg} || true)
   if [ "${installed}" = "install ok installed" ]; then
     echo Removing ${pkg}
-    apt-get -y --force-yes remove ${pkg}
+    time apt-get -y --force-yes remove ${pkg}
   fi
 done
 

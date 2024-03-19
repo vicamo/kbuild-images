@@ -102,7 +102,10 @@ jobs:
       - generate-matrix
     strategy:
       matrix:
-        include: ${{ fromJSON(needs.generate-matrix.outputs.json) }}
+        include:
+          - series: mantic
+            arches: 'arm64'
+            platforms: 'linux/arm64/v8'
     steps:
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@main
