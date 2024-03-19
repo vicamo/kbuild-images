@@ -1,0 +1,292 @@
+---
+name: 'CI'
+on:
+  push:
+    branches:
+      - main
+      - 'releases/v*'
+    tags:
+      - 'v*'
+    paths-ignore:
+      - LICENSE
+      - 'README.*'
+  pull_request:
+    paths-ignore:
+      - LICENSE
+      - 'README.*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      json: ${{ steps.matrix.outputs.json }}
+    steps:
+      -
+        # Add support for more platforms with QEMU (optional)
+        # https://github.com/docker/setup-qemu-action
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: v0.12.0
+
+      - name: Checkout kteam-tools
+        run: |
+          echo "::group::git clone kteam-tools"
+          git clone --depth 1 \
+              https://kernel.ubuntu.com/gitea/kernel/kteam-tools.git
+          echo "::endgroup::"
+
+      - name: Build Ubuntu series info
+        id: series
+        run: |
+          export CDIR="$(realpath kteam-tools/chroot-setup)"
+          ktl_series="$(${CDIR}/scripts/chroot-config release | tr -d ';')"
+          json="[]"
+          while read discard series status; do \
+            expired="false"
+            old="false"
+            [ "${status}" != "expired" ] || expired="true"
+            [ "${status}" != "old" ] || old="true"
+            series_json="{\"series\": \"${series}\", \"arches\": [], \"expired\": ${expired}, \"old\": ${old}}"
+
+            platforms=( $(docker buildx imagetools inspect "ubuntu:${series}" | \
+                awk '/Platform:/ {print $2}') ); \
+            for platform in "${platforms[@]}"; do \
+              arch=; \
+              case "${platform}" in \
+                linux/amd64)    arch="amd64" ;; \
+                linux/arm/v5)   arch="armel" ;; \
+                linux/arm/v7)   arch="armhf" ;; \
+                linux/arm64/v8) arch="arm64" ;; \
+                linux/i386)     arch="i386" ;; \
+                linux/mips64le) arch="mips64el" ;; \
+                linux/ppc64le)  arch="ppc64el" ;; \
+                linux/riscv64)  arch="riscv64" ;; \
+                linux/s390x)    arch="s390x" ;; \
+                *) ;; \
+              esac; \
+              if [ -n "${arch}" ]; then \
+                series_json="$(echo "${series_json}" | \
+                    jq -c -M ".arches += [{\"platform\": \"${platform}\", \"arch\": \"${arch}\"}]")"; \
+              fi; \
+            done; \
+            if [ "$(echo "${series_json}" | jq -c -M ".arches | length")" != "0" ]; then \
+              json="$(echo "${json}" | jq -c -M ". + [${series_json}]")"; \
+            fi; \
+          done <<<"${ktl_series}"
+
+          echo "::group::Outputs"
+          echo "json=${json}" | tee -a "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
+
+      - name: Transform build matrix
+        id: matrix
+        run: |
+          json='${{ steps.series.outputs.json }}'
+          json="$(echo "$json" | \
+              jq -c -M "[.[] | select(.expired|not) | {\"series\": .series, \"arches\": ([ .arches[] | .arch ] | join(\" \")), \"platforms\": ([ .arches[] | .platform ] | join(\",\"))}]")"
+
+          echo "::group::Outputs"
+          echo "json=${json}" | tee -a "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
+
+  build:
+    runs-on: ubuntu-latest
+    needs:
+      - generate-matrix
+    strategy:
+      matrix:
+        include:
+          - series: mantic
+            arches: 'arm64'
+            platforms: 'linux/arm64/v8'
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+
+      - name: Enable Containerd Snapshotter
+        run: |
+          cat /etc/docker/daemon.json | \
+              jq '. | .+{"features": {"containerd-snapshotter": true}}' | \
+              sudo tee /etc/docker/daemon.json.new
+          sudo mv /etc/docker/daemon.json.new /etc/docker/daemon.json
+          sudo systemctl restart docker
+
+          docker info -f '{{ .DriverStatus }}'
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout kteam-tools
+        run: |
+          echo "::group::git clone kteam-tools"
+          git clone --depth 1 \
+              https://kernel.ubuntu.com/gitea/kernel/kteam-tools.git
+
+          cd kteam-tools
+          git config --global user.name github-ci
+          git config --global user.email github-ci@github-ci
+          for patch in ${GITHUB_WORKSPACE}/patches/*.patch; do
+            git am -s ${patch}
+          done
+
+          echo "::endgroup::"
+
+      - name: Check QEMU necessity
+        id: transform
+        shell: bash
+        run: |
+          arches=(${{ matrix.arches }})
+          platforms="${{ matrix.platforms }}"
+
+          native=" $(dpkg --print-architecture) $(dpkg --print-foreign-architectures) "
+          qemu="false"
+          for arch in "${arches[@]}"; do
+            case "${native}" in
+              *" ${arch} "*) ;;
+              *) qemu="true" ;;
+            esac
+          done
+
+          echo "::group::Outputs"
+          echo "qemu=${qemu}" | tee -a "${GITHUB_OUTPUT}"
+          echo "::endgroup::"
+
+      -
+        # Add support for more platforms with QEMU (optional)
+        # https://github.com/docker/setup-qemu-action
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        if: steps.transform.outputs.qemu == 'true'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: v0.12.0
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          labels: |
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.version=20240311-git28d47a30
+          images: ghcr.io/${{ github.repository }}
+          flavor: |
+            latest=false
+          tags: |
+            ${{ matrix.series }}
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+
+      - name: Build docker images
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          annotations: ${{ contains(steps.transform.outputs.platforms, ',') && steps.meta.outputs.annotations || '' }}
+          build-args: |
+              SERIES=${{ matrix.series }}
+          context: '.'
+          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+          no-cache: true
+          platforms: ${{ matrix.platforms }}
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Checkout kernel tree
+        run: |
+          echo "::group::git clone kernel"
+          sudo git clone --depth 1 \
+              https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/${{ matrix.series }} \
+              linux
+          echo "::endgroup::"
+
+      - name: Test built docker images
+        env:
+          IMAGE_NAME: ${{ fromJSON(steps.build.outputs.metadata)['image.name'] }}
+        run: |
+          header="| Packages |"
+          neck="| :-- |"
+
+          arches=(${{ matrix.arches }})
+          for arch in "${arches[@]}"; do
+            echo "::group::Testing ${{ matrix.series }}:${arch}"
+
+            header="${header} ${arch} |"
+            neck="${neck} :-- |"
+
+            eval "declare -A pkginfo_${arch}"
+            eval "declare -n pkginfo=pkginfo_${arch}"
+
+            platform=
+            case "${arch}" in
+              amd64) platform=linux/amd64;;
+              i386) platform=linux/386;;
+              arm64) platform=linux/arm64/v8;;
+              armhf) platform=linux/arm/v7;;
+              armel) platform=linux/arm/v5;;
+              mips64el) platform=linux/mips64le;;
+              riscv64) platform=linux/riscv64;;
+              ppc64el) platform=linux/ppc64le;;
+              s390x) platform=linux/s390x;;
+            esac
+
+            container_id=$(docker run --platform "${platform}" --rm --detach \
+                --volume ./linux:/build --workdir /build \
+                "${IMAGE_NAME}" tail -f /dev/null)
+
+            EXECCMD="docker exec ${container_id}"
+            ${EXECCMD} fakeroot debian/rules clean
+            ${EXECCMD} git clean -d -f -x
+            ${EXECCMD} git status
+
+            # Generate image report
+            result=$(${EXECCMD} dpkg-query -l | \
+                tail -n +6 | awk '{print $1 " " $2 " " $3}')
+            while read status name version; do \
+              [ "${status}" = "ii" ] || exit 1; \
+              pkginfo["${name}"]="${version}"; \
+            done <<<"$result"
+
+            docker stop "${container_id}"
+
+            unset -n pkginfo
+
+            echo "::endgroup::"
+          done
+
+          all_packages=($( \
+              for arch in "${arches[@]}"; do \
+                eval "declare -n pkginfo=pkginfo_${arch}"; \
+                echo ${!pkginfo[@]}; \
+                unset -n pkginfo; \
+              done | tr ' ' '\n' | sort -u | tr '\n' ' '))
+          body=
+          for pkg in "${all_packages[@]}"; do \
+            body="${body}|${pkg}|"; \
+            for arch in "${arches[@]}"; do \
+              eval "declare -n pkginfo=pkginfo_${arch}"; \
+              body="${body}${pkginfo[${pkg}]:- }|"; \
+              unset -n pkginfo; \
+            done; \
+            body="${body}"$'\n'; \
+          done
+
+          { \
+            echo "# ${{ matrix.series }}"; \
+            echo "${header}"; \
+            echo "${neck}"; \
+            echo "${body}"; \
+          } >> "${GITHUB_STEP_SUMMARY}"
