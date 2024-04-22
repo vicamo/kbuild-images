@@ -104,12 +104,11 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.generate-matrix.outputs.json) }}
     steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+
       - name: Enable Containerd Snapshotter
         run: |
-          echo "::group::docker image prune"
-          docker image prune --all --force
-          echo "::endgroup::"
-
           cat /etc/docker/daemon.json | \
               jq '. | .+{"features": {"containerd-snapshotter": true}}' | \
               sudo tee /etc/docker/daemon.json.new
@@ -120,6 +119,21 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Checkout kteam-tools
+        run: |
+          echo "::group::git clone kteam-tools"
+          git clone --depth 1 \
+              https://kernel.ubuntu.com/gitea/kernel/kteam-tools.git
+
+          cd kteam-tools
+          git config --global user.name github-ci
+          git config --global user.email github-ci@github-ci
+          for patch in ${GITHUB_WORKSPACE}/patches/*.patch; do
+            git am -s ${patch}
+          done
+
+          echo "::endgroup::"
 
       - name: Check QEMU necessity
         id: transform
@@ -164,6 +178,7 @@ jobs:
         with:
           labels: |
             org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.version=20240311-git28d47a30
           images: ghcr.io/${{ github.repository }}
           flavor: |
             latest=false
@@ -172,15 +187,103 @@ jobs:
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
 
-      - name: Build
+      - name: Build docker images
+        id: build
         uses: docker/build-push-action@v5
         with:
           annotations: ${{ contains(steps.transform.outputs.platforms, ',') && steps.meta.outputs.annotations || '' }}
           build-args: |
               SERIES=${{ matrix.series }}
+          context: '.'
           labels: ${{ steps.meta.outputs.labels }}
           load: true
           no-cache: true
           platforms: ${{ matrix.platforms }}
           provenance: false
           tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Checkout kernel tree
+        run: |
+          echo "::group::git clone kernel"
+          sudo git clone --depth 1 \
+              https://git.launchpad.net/~ubuntu-kernel/ubuntu/+source/linux/+git/${{ matrix.series }} \
+              linux
+          echo "::endgroup::"
+
+      - name: Test built docker images
+        env:
+          IMAGE_NAME: ${{ fromJSON(steps.build.outputs.metadata)['image.name'] }}
+        run: |
+          header="| Packages |"
+          neck="| :-- |"
+
+          arches=(${{ matrix.arches }})
+          for arch in "${arches[@]}"; do
+            echo "::group::Testing ${{ matrix.series }}:${arch}"
+
+            header="${header} ${arch} |"
+            neck="${neck} :-- |"
+
+            eval "declare -A pkginfo_${arch}"
+            eval "declare -n pkginfo=pkginfo_${arch}"
+
+            platform=
+            case "${arch}" in
+              amd64) platform=linux/amd64;;
+              i386) platform=linux/386;;
+              arm64) platform=linux/arm64/v8;;
+              armhf) platform=linux/arm/v7;;
+              armel) platform=linux/arm/v5;;
+              mips64el) platform=linux/mips64le;;
+              riscv64) platform=linux/riscv64;;
+              ppc64el) platform=linux/ppc64le;;
+              s390x) platform=linux/s390x;;
+            esac
+
+            container_id=$(docker run --platform "${platform}" --rm --detach \
+                --volume ./linux:/build --workdir /build \
+                "${IMAGE_NAME}" tail -f /dev/null)
+
+            EXECCMD="docker exec ${container_id}"
+            ${EXECCMD} fakeroot debian/rules clean
+            ${EXECCMD} git clean -d -f -x
+            ${EXECCMD} git status
+
+            # Generate image report
+            result=$(${EXECCMD} dpkg-query -l | \
+                tail -n +6 | awk '{print $1 " " $2 " " $3}')
+            while read status name version; do \
+              [ "${status}" = "ii" ] || exit 1; \
+              pkginfo["${name}"]="${version}"; \
+            done <<<"$result"
+
+            docker stop "${container_id}"
+
+            unset -n pkginfo
+
+            echo "::endgroup::"
+          done
+
+          all_packages=($( \
+              for arch in "${arches[@]}"; do \
+                eval "declare -n pkginfo=pkginfo_${arch}"; \
+                echo ${!pkginfo[@]}; \
+                unset -n pkginfo; \
+              done | tr ' ' '\n' | sort -u | tr '\n' ' '))
+          body=
+          for pkg in "${all_packages[@]}"; do \
+            body="${body}|${pkg}|"; \
+            for arch in "${arches[@]}"; do \
+              eval "declare -n pkginfo=pkginfo_${arch}"; \
+              body="${body}${pkginfo[${pkg}]:- }|"; \
+              unset -n pkginfo; \
+            done; \
+            body="${body}"$'\n'; \
+          done
+
+          { \
+            echo "# ${{ matrix.series }}"; \
+            echo "${header}"; \
+            echo "${neck}"; \
+            echo "${body}"; \
+          } >> "${GITHUB_STEP_SUMMARY}"

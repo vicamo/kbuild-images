@@ -1,0 +1,26 @@
+From 747cfef164cbb9ff1ea36dc1146f98506e0b91f5 Mon Sep 17 00:00:00 2001
+From: You-Sheng Yang <vicamo@gmail.com>
+Date: Fri, 15 Mar 2024 14:05:17 +0800
+Subject: [PATCH] chroot-setup: add back updates pocket
+
+Signed-off-by: You-Sheng Yang <vicamo@gmail.com>
+---
+ chroot-setup/scripts/chroot-defs.conf | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/chroot-setup/scripts/chroot-defs.conf b/chroot-setup/scripts/chroot-defs.conf
+index 516cedb6..7439873b 100755
+--- a/chroot-setup/scripts/chroot-defs.conf
++++ b/chroot-setup/scripts/chroot-defs.conf
+@@ -421,7 +421,7 @@ release_build_arches focal "amd64 arm64 armhf i386 ppc64el riscv64 s390x"
+ release_build_arches_sparse
+ 
+ # POCKETS: lists the pockets we should add in each chroot
+-release_pockets dapper "release security"
++release_pockets dapper "release security updates"
+ release_pockets_sparse
+ 
+ # BUILD DEP: define the build depends to install in each chroot
+-- 
+2.43.0
+
